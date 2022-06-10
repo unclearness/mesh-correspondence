@@ -1,5 +1,6 @@
 import numpy as np
 from obj_io import ObjMesh, loadObj, saveObj
+import argparse
 
 
 def calcFaceCenters(verts, indices):
@@ -8,20 +9,20 @@ def calcFaceCenters(verts, indices):
     return centers
 
 
-def calcFaceCorrespondence(a, b):
-    pass
-
-
-def nearest_neighbors(query, data, num_nn=1):
+def nearest_neighbors(query,  # [Q, dim]
+                      data,  # [D, dim]
+                      num_nn=1,
+                      dist_func=lambda x, y: np.linalg.norm(x-y, axis=-1)):
     n_data, _ = data.shape
     qd = np.repeat(query[:, None], n_data, axis=1)  # [Q, D, dim]
-    dist_all = np.linalg.norm(qd - data, axis=-1)  # [Q, D]
+    dist_all = dist_func(qd, data)  # [Q, D]
     if num_nn == 1:
         nn = np.argmin(dist_all, axis=-1)[..., None]  # [Q, 1]
     else:
         nn = np.argsort(dist_all, axis=-1)  # [Q, D]
         if num_nn > 1:
             nn = nn[:, :num_nn]  # [Q, N]
+        # if num_nn <= 0 , return all
     return nn, np.take_along_axis(dist_all, nn, axis=-1)
 
 
@@ -44,16 +45,6 @@ def calcQuadTriCorrespondence(quad_verts, quad_indices,
         for tri_i in tris.tolist():
             q2t[j].append(tri_i)
             t2q[tri_i].append(j)
-    if False:
-        for i, tri_i in enumerate(tri_indices_q):
-            matched = None
-            for j, q_i in enumerate(quad_indices):
-                if np.isin(tri_i, q_i).all():
-                    matched = j
-                    break
-            assert(matched is not None)
-            q2t[matched].append(i)
-            t2q[i].append(matched)
     return q2t, t2q
 
 
@@ -76,24 +67,49 @@ def visualizeQuadTriCorrespondence(quad_path, tri_path, quad, tri, q2t):
             vis_tri_indices.append([tri_count * 3, tri_count * 3 + 1,
                                     tri_count * 3 + 2])
     vis_quad = ObjMesh(verts=vis_quad_verts,
-                        indices=vis_quad_indices,
-                        vert_colors=vis_quad_colors)
+                       indices=vis_quad_indices,
+                       vert_colors=vis_quad_colors)
     vis_tri = ObjMesh(verts=vis_tri_verts, indices=vis_tri_indices,
-                        vert_colors=vis_tri_colors)
+                      vert_colors=vis_tri_colors)
     saveObj(quad_path, vis_quad)
     saveObj(tri_path, vis_tri)
 
 
+def writeDict(path, d):
+    if path == '':
+        return
+    with open(path, 'w') as fp:
+        for k in sorted(d.keys()):
+            fp.write(' '.join([str(x) for x in d[k]]) + '\n')
+
+
 if __name__ == '__main__':
-    data_dir = './spot/'
-    quad_path = data_dir + 'spot_quadrangulated.obj'
-    tri_path = data_dir + 'spot_triangulated.obj'
-    tri_ml_path = data_dir + 'spot_triangulated_meshlab.obj'
+    parser = argparse.ArgumentParser(
+             description='Quad and triangle mesh correspondence')
+    parser.add_argument('quad', help='Quad .obj')
+    parser.add_argument('tri', help='Tri .obj')
+    parser.add_argument('--quad_vis', default='./quad_vis.obj')
+    parser.add_argument('--tri_vis', default='./tri_vis.obj')
+    parser.add_argument('--q2t', default='./q2t.txt')
+    parser.add_argument('--t2q', default='./t2q.txt')
+
+    args = parser.parse_args()
+
+    quad_path = args.quad
+    tri_path = args.tri
 
     quad = loadObj(quad_path)
     tri = loadObj(tri_path)
-    tri_ml = loadObj(tri_ml_path)
 
-    q2t, t2q = calcQuadTriCorrespondence(quad.verts, quad.indices, tri.verts, tri.indices)
-    visualizeQuadTriCorrespondence("quad.obj", "tri.obj", quad, tri, q2t)
-    
+    q2t_path = args.q2t
+    t2q_path = args.t2q
+    q2t, t2q = calcQuadTriCorrespondence(quad.verts, quad.indices,
+                                         tri.verts, tri.indices)
+    writeDict(q2t_path, q2t)
+    writeDict(t2q_path, t2q)
+
+    quad_vis_path = args.quad_vis
+    tri_vis_path = args.tri_vis
+    if quad_vis_path != '' or tri_vis_path != '':
+        visualizeQuadTriCorrespondence(quad_vis_path,
+                                       tri_vis_path, quad, tri, q2t)
